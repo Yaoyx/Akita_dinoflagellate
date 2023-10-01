@@ -3,7 +3,6 @@ import pandas as pd
 import cooltools
 import cooler
 import logging
-logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 logger = logging.getLogger('one')
 logger.setLevel(logging.DEBUG)
 
