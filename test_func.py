@@ -14,6 +14,8 @@ logger.addHandler(ch)
 # logger.disabled = True
 
 
+
+# create a small toy example inside the test func with a human readable small data
 def test_cis_total_filter(request):
     '''
     Test function for filtering out bad bins based on cis-total-ratio coverage.
