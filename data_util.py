@@ -27,19 +27,11 @@ def _bins_cis_total_ratio_filter(clr, thres):
     Returns
     -------
     numpy.ndarray
-        An array of bin indices with low cis-to-total coverage ratio.
-
-    Notes
-    -----
-    This function uses the `cooltools.coverage` function to compute the cis-to-total
-    coverage ratio for each bin, and returns an array of bin indices with a ratio
-    below `thres`. The returned array contains the indices of bins with low cis-to-total
-    coverage ratio, which can be used to filter out these bins from the input Cooler object.
-
+        An array of bin mask.
     """
     coverage = cooltools.coverage(clr)
     cis_total_cov = coverage[0] / coverage[1]
-    bins_mask = np.argwhere((cis_total_cov <= thres)).reshape(-1)
+    bins_mask = cis_total_cov <= thres
 
     return bins_mask
 
@@ -63,31 +55,57 @@ def _write_filtered_pixels_files(clr, chunk_pixels, bin_mask, count_output_path)
     Returns
     -------
     None
+
     """
-    pixels_mask = chunk_pixels['bin1_id'].isin(bin_mask)
+    bad_bins_index = np.array(range(clr.bins().shape[0]))[bin_mask]
+    pixels_mask = chunk_pixels['bin1_id'].isin(bad_bins_index)
     chunk_pixels.loc[pixels_mask, 'count'] = 0
-    pixels_mask = chunk_pixels['bin2_id'].isin(bin_mask)
+    pixels_mask = chunk_pixels['bin2_id'].isin(bad_bins_index)
     chunk_pixels.loc[pixels_mask, 'count'] = 0
     # Then write the counts in text file:
-    with open(count_output_path, 'a') as count_f:
+    with open(count_output_path, 'a+') as count_file:
         for i, row in chunk_pixels.iterrows():
-            bin1, bin2, count = row.value()
-            chrom1, start1, end1 = list(clr.bins()[bin1])[:3]
-            chrom2, start2, end2 = list(clr.bins()[bin2])[:3]
+            bin1_id, bin2_id, count = row
+            chrom1, start1, end1 = list(clr.bins()[bin1_id])[:3]
+            chrom2, start2, end2 = list(clr.bins()[bin2_id])[:3]
 
-            count_f.write(f"{chrom1}\t{start1}\t{end1}\t{chrom2}\t{start2}\t{end2}\t{count}\n")
+            count_file.write(f"{chrom1}\t{start1}\t{end1}\t{chrom2}\t{start2}\t{end2}\t{count}\n")
 
 def filter_pixels_by_masked_bin(clr, thres, chromsize_output_path, count_output_path, chunksize=10_000_000):
+    """
+    Filter the pixels of a cooler object based on a binary mask of masked bins.
+
+    Parameters
+    ----------
+    clr : cooler.Cooler
+        The cooler object to filter.
+    thres : float
+        The threshold for the cis-total ratio filter.
+    chromsize_output_path : str
+        The path to the output file where the chromosome sizes will be written.
+    count_output_path : str
+        The path to the output file where the filtered pixels will be written.
+    chunksize : int, optional
+        The size of the chunks to process the pixels in, in number of pixels.
+
+    Returns
+    -------
+    None
     
+    """
+
+    logger.debug('Start to make bin mask...')
     bin_mask = _bins_cis_total_ratio_filter(clr, thres)
     tot_pixels = clr.pixels().shape[0]
     iter_num = tot_pixels // chunksize
 
     # First write the chromosome sizes:
-    with open(chromsize_output_path, 'a') as chromsize_f:
+    logger.debug('Start to create chromsize file...')
+    with open(chromsize_output_path, 'a+') as chromsize_file:
         for i, chromsize in enumerate(clr.chromsizes):
-            chromsize_f.write(f"{clr.chromnames[i]}\t{chromsize}\n")
+            chromsize_file.write(f"{clr.chromnames[i]}\t{chromsize}\n")
 
+    logger.debug('Start to create pixels counts file...')
     for i in range(iter_num):
         chunk_pixels = clr.pixels()[chunksize * i : chunksize * (i + 1)]
         
