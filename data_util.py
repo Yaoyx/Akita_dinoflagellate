@@ -3,6 +3,7 @@ import pandas as pd
 import cooltools
 import cooler
 import logging
+import functools
 logger = logging.getLogger('one')
 logger.setLevel(logging.DEBUG)
 
@@ -35,83 +36,105 @@ def _bins_cis_total_ratio_filter(clr, thres):
 
     return bins_mask
 
-def _write_filtered_pixels_files(clr, chunk_pixels, bin_mask, count_output_path):
+def _pixels_filter(bins_table, chunk_pixels, bin_mask):
     """
-    Write the counts of interactions between genomic regions to a text file.
+    Filter out pixels that belong to bad bins.
 
-    This function takes a cooler object containing the genomic regions, a DataFrame containing the counts of interactions
-    between genomic regions, and the path to the output text file. It then writes the counts of interactions to the output
-    text file.
-
-    Parameters
-    ----------
-    clr : cooler.Cooler
-        A cooler object containing the genomic regions.
+    Parameters:
+    -----------
+    bin_table : numpy.ndarray
+        A 2D array of shape (n_bins, n_features) containing the features of each bin.
     chunk_pixels : pandas.DataFrame
-        A DataFrame containing the counts of interactions between genomic regions.
-    count_output_path : str
-        The path to the output text file.
+        A DataFrame containing the pixels to filter.
+    bin_mask : numpy.ndarray
+        A boolean array of shape (n_bins,) indicating which bins are bad.
 
-    Returns
-    -------
-    None
-
+    Returns:
+    --------
+    pandas.DataFrame
+        A DataFrame containing only the pixels that belong to good bins.
     """
-    bad_bins_index = np.array(range(clr.bins().shape[0]))[bin_mask]
-    pixels_mask = chunk_pixels['bin1_id'].isin(bad_bins_index)
-    chunk_pixels.loc[pixels_mask, 'count'] = 0
-    pixels_mask = chunk_pixels['bin2_id'].isin(bad_bins_index)
-    chunk_pixels.loc[pixels_mask, 'count'] = 0
-    # Then write the counts in text file:
-    with open(count_output_path, 'a+') as count_file:
-        for i, row in chunk_pixels.iterrows():
-            bin1_id, bin2_id, count = row
-            chrom1, start1, end1 = list(clr.bins()[bin1_id])[:3]
-            chrom2, start2, end2 = list(clr.bins()[bin2_id])[:3]
+    bad_bins_index = np.array(range(bins_table.shape[0]))[bin_mask]
+    pixels_mask = chunk_pixels['bin1_id'].isin(bad_bins_index) + chunk_pixels['bin2_id'].isin(bad_bins_index)
+    return chunk_pixels[pixels_mask]
 
-            count_file.write(f"{chrom1}\t{start1}\t{end1}\t{chrom2}\t{start2}\t{end2}\t{count}\n")
-
-def filter_pixels_by_masked_bin(clr, thres, chromsize_output_path, count_output_path, chunksize=10_000_000):
+def pixels_filter_generator(bins_table, bin_mask):
     """
-    Filter the pixels of a cooler object based on a binary mask of masked bins.
+    Returns a partial function that filters pixels based on the provided bins table and bin mask.
+
+    Parameters:
+    -----------
+    bins_table : dict
+        A dictionary containing the bins table.
+    bin_mask : numpy.ndarray
+        A numpy array containing the bin mask.
+
+    Returns:
+    --------
+    partial function
+        A partial function that filters pixels based on the provided bins table and bin mask.
+    """
+
+    return functools.partial(_pixels_filter, bins_table=bins_table, bin_mask=bin_mask)
+
+class pixels_iterator:
+    def __init__(self, clr_pixels_selector, pixels_size, chunksize):
+        self.chunksize = chunksize
+        self.max = pixels_size
+        self.pixels = clr_pixels_selector
+
+    def __iter__(self):
+        self.pivot = 0
+        return self
+
+    def __next__(self):
+        if (self.pivot + self.chunksize) < self.max:
+            pivot = self.pivot
+            self.pivot += self.chunksize
+            return self.pixels[pivot : self.pivot]
+        elif self.pivot < self.max:
+            pivot = self.pivot
+            self.pivot = self.max
+            return self.pixels[pivot : self.pivot]
+        else:
+            raise StopIteration
+
+def filter_pixels_by_masked_bin(clr, thres, output_path, chunksize=10_000_000):
+    """
+    Filter pixels of a cooler object based on a binary mask of genomic bins.
 
     Parameters
     ----------
     clr : cooler.Cooler
-        The cooler object to filter.
+        A cooler object containing contact matrices and genomic bin information.
     thres : float
-        The threshold for the cis-total ratio filter.
-    chromsize_output_path : str
-        The path to the output file where the chromosome sizes will be written.
-    count_output_path : str
-        The path to the output file where the filtered pixels will be written.
+        A threshold value for filtering genomic bins based on their cis/trans ratio.
+    output_path : str
+        The path to the output cooler file.
     chunksize : int, optional
-        The size of the chunks to process the pixels in, in number of pixels.
+        The number of pixels to process at a time. Default is 10,000,000.
 
     Returns
     -------
     None
-    
+
+    Notes
+    -----
+    This function creates a binary mask of genomic bins based on their cis/trans ratio,
+    and uses it to filter the pixels of the input cooler object. The resulting filtered
+    pixels are written to a new cooler file at the specified output path.
+
     """
 
     logger.debug('Start to make bin mask...')
     bin_mask = _bins_cis_total_ratio_filter(clr, thres)
+    bins_table = clr.bins()[:]
     tot_pixels = clr.pixels().shape[0]
-    iter_num = tot_pixels // chunksize
-
-    # First write the chromosome sizes:
-    logger.debug('Start to create chromsize file...')
-    with open(chromsize_output_path, 'a+') as chromsize_file:
-        for i, chromsize in enumerate(clr.chromsizes):
-            chromsize_file.write(f"{clr.chromnames[i]}\t{chromsize}\n")
 
     logger.debug('Start to create pixels counts file...')
-    for i in range(iter_num):
-        chunk_pixels = clr.pixels()[chunksize * i : chunksize * (i + 1)]
-        
-        ### Here we might use multiprocessing to boost the speed, but does order matter###
-        _write_filtered_pixels_files(clr, chunk_pixels, bin_mask, count_output_path)
+    pixels_chunks = pixels_iterator(clr.pixels(), tot_pixels, chunksize)
+    pixels_filter = pixels_filter_generator(bins_table, bin_mask)
+
+    cooler.create_cooler(output_path, bins=bins_table, pixels=map(pixels_filter, pixels_chunks), ordered=True, columns=['count']) # input an iterator to pixels parameter
+
     
-    # remainder 
-    chunk_pixels = clr.pixels()[chunksize * iter_num:]
-    _write_filtered_pixels_files(clr, chunk_pixels, count_output_path)
