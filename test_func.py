@@ -1,5 +1,7 @@
+import os 
 import sys
-sys.path.append('/home1/yxiao977/labwork/Akita_dinoflagellate')
+cwd = os.getcwd()
+sys.path.append(cwd)
 import data_util
 import cooler
 import logging
@@ -55,7 +57,9 @@ def test_cis_total_filter(thres, clr_test=None):
 
     logger.debug('Start to test filter_pixels function...')
     output_path = f"/home1/yxiao977/sc1/train_akita/test_data/test_data_util_{thres}filtered.cool"
-    data_util.filter_pixels_by_masked_bin(clr_test, thres, output_path, bins_filters=None, nproc=16, chunksize=10_000_000)
+    bin_mask = data_util.generate_bin_mask(clr_test, [data_util.cis_total_ratio_filter], [0.5])
+    data_util.create_filtered_cooler(output_path, clr_test, bin_mask, nproc=16, chunksize=10_000_000)
+    
     clr_filtered = cooler.Cooler(output_path)
 
     # check if clr_filtered has nan cis_total ratio for bins filtered out
@@ -73,20 +77,5 @@ def test_cis_total_filter(thres, clr_test=None):
     # check if good bins has nan cis-total ratio
     logger.info('\n\n######### Pass the test #########')
 
-
-    
-    
-    
-    # logger.debug('Start to sum up counts')
-    # check_nan = lambda x: np.isnan(x['count']).all()
-    
-    # check_result = np.sum(list(map(check_nan, bad_pixels_binid1)))
-    # assert check_result == len(bad_pixels_binid1)
-    # logger.info('Pass bin1 checkpoint')
-
-
-    # check_result = np.sum(list(map(check_nan, bad_pixels_binid2)))
-    # assert check_result == len(bad_pixels_binid2)
-    # logger.info('Pass bin2 checkpoint')
 
 
