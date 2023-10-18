@@ -48,7 +48,9 @@ def cis_total_ratio_filter(clr, thres=0.5):
     return bin_mask
 
 
-def generate_bin_mask(clr, filters=[None], store=False, store_suffix=">__thres"):
+def generate_bin_mask(
+    clr, filters=[None], store=False, store_name="cis_total_ratio_>_0.5_thres"
+):
     """
     Generates a binary mask for a given `clr` object based on a list of filters and thresholds.
 
@@ -60,8 +62,8 @@ def generate_bin_mask(clr, filters=[None], store=False, store_suffix=">__thres")
         A list of filter functions to apply to the contact matrices.
     store : bool, optional
         If True, store the results in the input cooler file when finished. Default is False.
-    store_suffix : str, optional
-        Name suffix of the columns of the bin table to save bin mask. 
+    store_name : str, optional
+        Name of the columns of the bin table to save bin mask.
 
     Returns
     -------
@@ -77,13 +79,10 @@ def generate_bin_mask(clr, filters=[None], store=False, store_suffix=">__thres")
 
     if store:
         with clr.open("r+") as grp:
-            store_name = 'cis_total_ratio_' + store_suffix
             if store_name in grp["bins"]:
                 del grp["bins"][store_name]
             h5opts = dict(compression="gzip", compression_opts=6)
-            grp["bins"].create_dataset(
-                store_name, data=bin_mask, **h5opts, dtype=bool
-            )
+            grp["bins"].create_dataset(store_name, data=bin_mask, **h5opts, dtype=bool)
 
     return bin_mask
 
