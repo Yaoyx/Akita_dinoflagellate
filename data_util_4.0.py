@@ -1,5 +1,4 @@
 import numpy as np
-from toolz import curry
 import cooltools
 import cooler
 import functools
@@ -16,7 +15,31 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 
-@curry
+def add_partial_thres_arguments(func):
+    """
+    Decorator that adds a threshold argument to a function and returns a partial function.
+
+    The returned partial function has the threshold argument set to the provided value.
+
+    Parameters
+    ----------
+    func : callable
+        The function to decorate.
+
+    Returns
+    -------
+    callable
+        A new function that takes a threshold argument and returns a partial function of `func`.
+    """
+
+    def wrapper(thres):
+        if not isinstance(thres, float):
+            raise ValueError("Threshold must be a float > 0 or <= 1.0")
+        return functools.partial(func, thres=thres)
+
+    return wrapper
+
+@add_partial_thres_arguments
 def cis_total_ratio_filter(clr, thres=0.5):
     """
     Filter out bins with low cis-to-total coverage ratio from a Cooler object.
@@ -35,12 +58,8 @@ def cis_total_ratio_filter(clr, thres=0.5):
 
     Note
     ----
-    This curried function accepts partial evaluation with only providing threshold value.
+    Generate a filter by giving a threshold
     """
-    if isinstance(clr, float):
-        raise TypeError(
-            "If only threshold value is provided, please use 'thres' keyword to set threshold value (e.g. thres=0.2)"
-        )
     coverage = cooltools.coverage(clr)
     cis_total_cov = coverage[0] / coverage[1]
     bin_mask = cis_total_cov > thres
