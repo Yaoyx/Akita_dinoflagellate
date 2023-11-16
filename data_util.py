@@ -1,8 +1,11 @@
 import numpy as np
+import pandas as pd
 from toolz import curry
 import cooltools
 import cooler
 import functools
+import bioframe as bf
+import datetime
 from multiprocessing import Pool
 import logging
 
@@ -212,3 +215,52 @@ def create_filtered_cooler(
     )
 
     logger.debug("done")
+
+def create_gap_file(output_dir, hic_target_files, genomeName, num_bad_conseq=10):
+    """
+    Creates a gap file from Hi-C data.
+
+    Parameters
+    ----------
+    output_dir : str
+        The directory where the gap file will be saved.
+    hic_target_files : list
+        A list of Hi-C files to process.
+    genomeName : str
+        The name of the genome.
+    num_bad_conseq : int, optional
+        The number of consecutive bad bins to consider as a gap. Default is 10.
+
+    Returns
+    -------
+    None
+    """
+    now = datetime.datetime.now()
+    now = str(now)[2:10].replace('-','')
+    print(now)
+
+    badbins_combined = []
+    for hic_file in hic_target_files:
+        print(hic_file)
+        # open genome Hi-C file
+        genome_hic_cool = cooler.Cooler(hic_file)    
+        binSize = genome_hic_cool.info['bin-size']
+        bad_inds =  pd.isnull( genome_hic_cool.bins()['weight'][:].values )
+        badbins = bf.merge(
+            genome_hic_cool.bins()[:].iloc[ bad_inds ][['chrom','start','end']]) 
+        badbins.rename(columns={'chrom':'chr','end':'stop'},inplace=True)
+        badbin_lens = (badbins['stop'].values-badbins['start'].values)
+        print('num bad bins: ', np.sum(bad_inds),', num Mb',np.sum(badbin_lens)/1e6)
+        badbins_combined.append( badbins.iloc[ (badbin_lens > (binSize*num_bad_conseq)) ] )
+
+    badbins_combined = pd.concat(badbins_combined)
+    badbins_combined.sort_values(['chr','start','stop'],inplace=True) #just in case 
+    badbins_combined = bf.merge(badbins_combined, cols=['chr','start','stop'])
+
+    badbin_lens = (badbins_combined['stop'].values - badbins_combined['start'].values)
+    print('num gaps: ',len(badbins_combined),', num Mb',np.sum(badbin_lens)/1e6)
+
+    # write to file
+    badbins_combined.to_csv(output_dir+now+'_gaps_'+genomeName+'_binSize'+str(binSize)+
+                            '_numconseq'+str(num_bad_conseq)+'.bed',   
+                            sep='\t', index=False, header=False, columns=['chr','start','stop'])
