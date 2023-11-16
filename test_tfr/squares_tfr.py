@@ -25,12 +25,12 @@ def main():
     (options,args) = parser.parse_args()
 
     # out_dir = 'squares_valid'
-    out_dir = 'squares_train'
+    out_dir = '/home1/yxiao977/sc1/akita_dinoflagellate/squares_train_test_mask/'
     if not os.path.isdir(out_dir):
         os.mkdir(out_dir)
 
-    seq_length = 25000
-    bin_size = 500
+    seq_length = 250
+    bin_size = 5
     seq_bins = seq_length // bin_size
 
     seqs_per_tfr = 32 #batch size
